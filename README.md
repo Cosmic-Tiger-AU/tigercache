@@ -1,95 +1,97 @@
-# Tiger Cache
+# TigerCache
 
-Tiger Cache is an embedded fuzzy search library inspired by Typesense. It provides fast, typo-tolerant search over a local cache of documents, similar to how SQLite works for databases.
+An embedded fuzzy search library with hybrid memory/disk storage.
 
 ## Features
 
-- **Embedded**: Self-contained library with no external dependencies
-- **Fuzzy Search**: Tolerant of typos and misspellings
-- **Trigram Indexing**: Fast candidate selection using trigram matching
-- **Levenshtein Distance**: Precise similarity scoring
-- **Persistence**: Save and load the index from a single file
-- **Simple API**: Easy to integrate and use
+- **Hybrid Storage**: File-based storage with memory caching, similar to SQLite
+- **Memory Management**: Configurable memory limits and intelligent caching
+- **Fast Search**: Trigram-based fuzzy search with Levenshtein distance
+- **Document Storage**: Store and retrieve documents with multiple fields
+- **Configurable**: Multiple storage backends and memory settings
 
-## Core Concepts
+## Storage Backends
 
-1. **Inverted Index**: Maps search terms (tokens) to the documents that contain them
-2. **Trigram Indexing**: Breaks words into smaller, overlapping chunks of three characters for fuzzy matching
-3. **Levenshtein Distance**: Calculates the "edit distance" between search queries and potential matches
-4. **Persistence**: Serializes the entire index to a single file
+TigerCache supports multiple storage backends:
+
+- **Memory**: In-memory storage for testing or small datasets
+- **Sled**: Fast embedded database (default)
+- **ReDB**: Rust embedded database (optional)
+- **RocksDB**: High-performance key-value store (optional)
 
 ## Usage
 
 ```rust
-use tiger_cache::{Document, TigerCache, SearchOptions};
+use tiger_cache::{TigerCache, TigerCacheConfig, Document, StorageType};
+use bytesize::ByteSize;
 
-// Create a new search engine
-let mut tiger_cache = TigerCache::new();
+// Create a configuration with Sled storage
+let config = TigerCacheConfig::new()
+    .with_storage_type(StorageType::Sled)
+    .with_storage_path("path/to/database")
+    .with_cache_size(ByteSize::mib(50))
+    .with_max_memory(ByteSize::mib(100));
 
-// Add documents
+// Create a new TigerCache instance
+let mut cache = TigerCache::with_config(config);
+
+// Add a document
 let mut doc = Document::new("doc1");
-doc.add_field("title", "Apple iPhone")
-   .add_field("description", "The latest smartphone from Apple");
-tiger_cache.add_document(doc).unwrap();
+doc.add_field("title", "Example Document")
+   .add_field("content", "This is an example document for TigerCache");
 
-// Search with default options
-let results = tiger_cache.search("iphone", None).unwrap();
-for result in results {
-    println!("Found: {} (score: {})", result.document.id, result.score);
-}
+cache.add_document(doc).unwrap();
 
-// Search with custom options
-let options = SearchOptions {
-    max_distance: 2,        // Maximum Levenshtein distance
-    score_threshold: 0.5,   // Minimum score threshold
-    limit: 10,              // Maximum number of results
-};
-let results = tiger_cache.search("aple", Some(options)).unwrap(); // Typo: "aple" instead of "apple"
+// Search for documents
+let results = cache.search("example", None).unwrap();
+println!("Found {} results", results.len());
 
-// Save to file
-tiger_cache.save_to_file("search_index.bin").unwrap();
+// Commit changes to disk
+cache.commit().unwrap();
 
-// Load from file
-let tiger_cache = TigerCache::open("search_index.bin").unwrap();
+// Close the cache
+cache.close().unwrap();
 ```
 
-## Example
+## Memory Management
 
-Run the included example:
+TigerCache includes sophisticated memory management:
 
-```bash
-cargo run --example simple_search
+- **Memory Pressure Detection**: Monitors memory usage and triggers eviction when needed
+- **Multi-tier Caching**: Separate caches for documents, indexes, and query results
+- **LRU Eviction**: Least recently used items are evicted first
+- **Configurable Limits**: Set memory budgets for different components
+
+## Configuration Presets
+
+TigerCache includes several configuration presets:
+
+- **Default**: Balanced settings for most use cases
+- **Development**: Smaller cache sizes for development environments
+- **Production**: Larger cache sizes for production environments
+- **Low Memory**: Minimal memory usage for resource-constrained environments
+
+```rust
+// Use a preset configuration
+let config = TigerCacheConfig::low_memory();
+let cache = TigerCache::with_config(config);
 ```
 
-This will start an interactive search demo with sample product data.
+## Performance
 
-## How It Works
+TigerCache is designed to handle datasets of 200,000+ documents efficiently, even on lower-end machines. The hybrid storage system allows it to offload data to disk when memory pressure is high, while keeping frequently accessed items in memory for fast access.
 
-1. **Document Indexing**:
-   - Documents are added to the index
-   - Text fields are tokenized into words
-   - Each token is broken into trigrams
-   - Trigrams are mapped to tokens, and tokens are mapped to documents
+## Feature Flags
 
-2. **Search Process**:
-   - The search query is tokenized and converted to trigrams
-   - Candidate tokens are found by matching trigrams
-   - Levenshtein distance is calculated between query tokens and candidates
-   - Documents containing the best matching tokens are retrieved and scored
-   - Results are sorted by relevance score
+TigerCache uses feature flags to make storage backends optional:
 
-3. **Persistence**:
-   - The entire index is serialized using bincode
-   - The serialized data is written to a single file
-   - The index can be loaded from the file later
-
-## Performance Considerations
-
-- The library keeps the entire index in memory for fast searching
-- For very large datasets, consider sharding or using a more specialized solution
-- The trigram approach provides a good balance between speed and accuracy for fuzzy search
+- `sled-storage`: Enable Sled storage backend (default)
+- `redb-storage`: Enable ReDB storage backend
+- `rocksdb-storage`: Enable RocksDB storage backend
+- `metrics-export`: Enable metrics export via Prometheus
+- `all-storage-backends`: Enable all storage backends
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+TBD
 

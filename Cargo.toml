@@ -16,7 +16,40 @@ rustc-hash = "2.0"
 smallvec = { version = "1.11", features = ["serde"] }
 lru = "0.12"
 
+# Storage backends for evaluation
+sled = { version = "0.34", optional = true }
+redb = { version = "1.5", optional = true }
+rocksdb = { version = "0.21", optional = true }
+
+# Memory management
+bytesize = "1.3"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+
+# Metrics and monitoring
+metrics = "0.21"
+metrics-exporter-prometheus = { version = "0.12", optional = true }
+
 [dev-dependencies]
 tempfile = "3.8"
 criterion = { version = "0.5", features = ["html_reports"] }
 sysinfo = "0.31"
+rand = "0.8"
+uuid = { version = "1.6", features = ["v4"] }
+
+[features]
+default = ["sled-storage"]
+sled-storage = ["sled"]
+redb-storage = ["redb"]
+rocksdb-storage = ["rocksdb"]
+metrics-export = ["metrics-exporter-prometheus"]
+all-storage-backends = ["sled-storage", "redb-storage", "rocksdb-storage"]
+
+[[bench]]
+name = "storage_comparison"
+path = "benchmarks/storage_comparison.rs"
+harness = false
+
+[[example]]
+name = "hybrid_storage"
+path = "examples/hybrid_storage.rs"

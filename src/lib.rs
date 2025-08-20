@@ -42,12 +42,24 @@ mod tiger_cache;
 mod persistence;
 mod search;
 mod trigram;
+mod storage;
+mod config;
 
 // Re-export public API
 pub use document::Document;
 pub use error::{TigerCacheError, Result};
 pub use tiger_cache::TigerCache;
 pub use search::{SearchOptions, SearchResult};
+pub use config::TigerCacheConfig;
+
+// Re-export storage API
+pub use storage::{
+    StorageConfig,
+    StorageType,
+    StorageEngine,
+    StorageTransaction,
+    create_storage_engine,
+};
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
