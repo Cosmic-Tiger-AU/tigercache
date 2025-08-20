@@ -5,7 +5,7 @@ use crate::trigram::extract_tokens;
 use levenshtein::levenshtein;
 use lru::LruCache;
 use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
 

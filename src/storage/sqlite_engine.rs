@@ -30,7 +30,7 @@ impl SqliteStorageEngine {
     /// Create a new SQLite storage engine
     pub fn new(config: StorageConfig) -> StorageResult<Self> {
         // Ensure we have a path
-        let path = config.path.clone().ok_or_else(|| {
+        let _path = config.path.clone().ok_or_else(|| {
             StorageError::ConfigurationError("SQLite storage requires a path".to_string())
         })?;
         
