@@ -225,7 +225,7 @@ impl Index {
             for trigram in query_trigrams {
                 if let Some(trigram_id) = self.interner.get_id(&trigram) {
                     if let Some(token_ids) = self.trigram_index.get(&trigram_id) {
-                        for &token_id in token_ids {
+                        for &token_id in token_ids.iter() {
                             if let Some(token) = self.interner.get(token_id) {
                                 candidate_tokens.insert(token.to_string());
                             }

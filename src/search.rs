@@ -208,11 +208,15 @@ impl Index {
                     return None;
                 }
                 
-                self.get_document(doc_id).map(|doc| SearchResult {
-                    document: doc.clone(),
-                    score: *score,
-                    matched_fields: Vec::new(),
-                })
+                if let Some(doc) = self.get_document(doc_id) {
+                    Some(SearchResult {
+                        document: doc.clone(),
+                        score: *score,
+                        matched_fields: Vec::new(),
+                    })
+                } else {
+                    None
+                }
             })
             .collect();
         
