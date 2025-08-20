@@ -67,7 +67,7 @@ impl Index {
             // Add document ID to inverted index for this token
             self.inverted_index
                 .entry(token.clone())
-                .or_insert_with(HashSet::new)
+                .or_default()
                 .insert(doc_id.clone());
             
             // Generate trigrams for the token
@@ -77,7 +77,7 @@ impl Index {
             for trigram in trigrams {
                 self.trigram_index
                     .entry(trigram)
-                    .or_insert_with(HashSet::new)
+                    .or_default()
                     .insert(token.clone());
             }
         }
@@ -225,4 +225,3 @@ mod tests {
         assert!(candidates.contains("document"));
     }
 }
-
