@@ -81,39 +81,45 @@ impl SqliteStorageEngine {
     
     /// Update storage statistics
     fn update_stats(&self) -> StorageResult<()> {
-        let conn = self.conn.lock().map_err(|_| StorageError::DatabaseError("Failed to lock SQLite connection".to_string()))?;
+        let mut conn = match self.conn.lock() {
+            Ok(conn) => conn,
+            Err(_) => return Err(StorageError::DatabaseError("Failed to lock SQLite connection".to_string())),
+        };
         
-        if let Ok(mut stats) = self.stats.lock() {
-            // Count keys
-            let key_count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM kv_store",
-                [],
-                |row| row.get(0)
-            ).map_err(|e| StorageError::DatabaseError(format!("Failed to count keys: {}", e)))?;
-            stats.key_count = key_count as usize;
-            
-            // Count pages
-            let page_count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM pages",
-                [],
-                |row| row.get(0)
-            ).map_err(|e| StorageError::DatabaseError(format!("Failed to count pages: {}", e)))?;
-            stats.page_count = page_count as usize;
-            
-            // Calculate total value size
-            let total_value_size: i64 = conn.query_row(
-                "SELECT COALESCE(SUM(LENGTH(value)), 0) FROM kv_store",
-                [],
-                |row| row.get(0)
-            ).map_err(|e| StorageError::DatabaseError(format!("Failed to calculate total value size: {}", e)))?;
-            stats.total_value_size = total_value_size as usize;
-            
-            // Count dirty pages
-            let page_cache = self.page_cache.read();
-            stats.dirty_page_count = page_cache.values()
-                .filter(|p| p.read().is_dirty())
-                .count();
-        }
+        let mut stats = match self.stats.lock() {
+            Ok(stats) => stats,
+            Err(_) => return Err(StorageError::DatabaseError("Failed to lock stats".to_string())),
+        };
+        
+        // Count keys
+        let key_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM kv_store",
+            [],
+            |row| row.get(0)
+        ).map_err(|e| StorageError::DatabaseError(format!("Failed to count keys: {}", e)))?;
+        stats.key_count = key_count as usize;
+        
+        // Count pages
+        let page_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pages",
+            [],
+            |row| row.get(0)
+        ).map_err(|e| StorageError::DatabaseError(format!("Failed to count pages: {}", e)))?;
+        stats.page_count = page_count as usize;
+        
+        // Calculate total value size
+        let total_value_size: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(LENGTH(value)), 0) FROM kv_store",
+            [],
+            |row| row.get(0)
+        ).map_err(|e| StorageError::DatabaseError(format!("Failed to calculate total value size: {}", e)))?;
+        stats.total_value_size = total_value_size as usize;
+        
+        // Count dirty pages
+        let page_cache = self.page_cache.read();
+        stats.dirty_page_count = page_cache.values()
+            .filter(|p| p.read().is_dirty())
+            .count();
         
         Ok(())
     }
@@ -125,7 +131,10 @@ impl StorageEngine for SqliteStorageEngine {
     }
     
     fn get(&self, key: &[u8]) -> StorageResult<Option<Vec<u8>>> {
-        let conn = self.conn.lock().map_err(|_| StorageError::DatabaseError("Failed to lock SQLite connection".to_string()))?;
+        let mut conn = match self.conn.lock() {
+            Ok(conn) => conn,
+            Err(_) => return Err(StorageError::DatabaseError("Failed to lock SQLite connection".to_string())),
+        };
         
         let result = conn.query_row(
             "SELECT value FROM kv_store WHERE key = ?",
@@ -142,7 +151,10 @@ impl StorageEngine for SqliteStorageEngine {
     }
     
     fn put(&self, key: &[u8], value: &[u8]) -> StorageResult<()> {
-        let conn = self.conn.lock().map_err(|_| StorageError::DatabaseError("Failed to lock SQLite connection".to_string()))?;
+        let mut conn = match self.conn.lock() {
+            Ok(conn) => conn,
+            Err(_) => return Err(StorageError::DatabaseError("Failed to lock SQLite connection".to_string())),
+        };
         
         conn.execute(
             "INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)",
@@ -158,7 +170,10 @@ impl StorageEngine for SqliteStorageEngine {
     }
     
     fn delete(&self, key: &[u8]) -> StorageResult<()> {
-        let conn = self.conn.lock().map_err(|_| StorageError::DatabaseError("Failed to lock SQLite connection".to_string()))?;
+        let mut conn = match self.conn.lock() {
+            Ok(conn) => conn,
+            Err(_) => return Err(StorageError::DatabaseError("Failed to lock SQLite connection".to_string())),
+        };
         
         conn.execute(
             "DELETE FROM kv_store WHERE key = ?",
@@ -174,7 +189,10 @@ impl StorageEngine for SqliteStorageEngine {
     }
     
     fn exists(&self, key: &[u8]) -> StorageResult<bool> {
-        let conn = self.conn.lock().map_err(|_| StorageError::DatabaseError("Failed to lock SQLite connection".to_string()))?;
+        let mut conn = match self.conn.lock() {
+            Ok(conn) => conn,
+            Err(_) => return Err(StorageError::DatabaseError("Failed to lock SQLite connection".to_string())),
+        };
         
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM kv_store WHERE key = ?",
@@ -191,14 +209,16 @@ impl StorageEngine for SqliteStorageEngine {
     }
     
     fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction + '_>> {
-        let conn = self.conn.lock().map_err(|_| StorageError::DatabaseError("Failed to lock SQLite connection".to_string()))?;
+        // We need to get a connection from the mutex, but we can't return a transaction
+        // that references the connection directly due to lifetime issues.
+        // Instead, we'll create a new transaction and immediately execute operations on it.
         
-        let tx = conn.transaction()
-            .map_err(|e| StorageError::TransactionError(format!("Failed to begin transaction: {}", e)))?;
-        
+        // For now, we'll return a simple in-memory transaction that will be committed
+        // to the database when it's committed.
         Ok(Box::new(SqliteTransaction {
-            tx: Some(tx),
+            tx: None,
             engine: self,
+            operations: Vec::new(),
         }))
     }
     
@@ -216,7 +236,10 @@ impl StorageEngine for SqliteStorageEngine {
         drop(page_cache);
         
         // Not in cache, try to load from database
-        let conn = self.conn.lock().map_err(|_| StorageError::DatabaseError("Failed to lock SQLite connection".to_string()))?;
+        let mut conn = match self.conn.lock() {
+            Ok(conn) => conn,
+            Err(_) => return Err(StorageError::DatabaseError("Failed to lock SQLite connection".to_string())),
+        };
         
         let page_data: Option<Vec<u8>> = conn.query_row(
             "SELECT data FROM pages WHERE id = ?",
@@ -257,7 +280,10 @@ impl StorageEngine for SqliteStorageEngine {
         
         // If the page is dirty, write it to disk
         if page_ref.read().is_dirty() {
-            let conn = self.conn.lock().map_err(|_| StorageError::DatabaseError("Failed to lock SQLite connection".to_string()))?;
+            let mut conn = match self.conn.lock() {
+                Ok(conn) => conn,
+                Err(_) => return Err(StorageError::DatabaseError("Failed to lock SQLite connection".to_string())),
+            };
             
             // Serialize the page
             let page_data = bincode::encode_to_vec(&*page_ref.read(), bincode::config::standard())?;
@@ -282,7 +308,10 @@ impl StorageEngine for SqliteStorageEngine {
     fn flush(&self) -> StorageResult<()> {
         // Flush all dirty pages to disk
         let page_cache = self.page_cache.read();
-        let conn = self.conn.lock().map_err(|_| StorageError::DatabaseError("Failed to lock SQLite connection".to_string()))?;
+        let mut conn = match self.conn.lock() {
+            Ok(conn) => conn,
+            Err(_) => return Err(StorageError::DatabaseError("Failed to lock SQLite connection".to_string())),
+        };
         
         // Begin a transaction for better performance
         let tx = conn.transaction()
@@ -331,10 +360,9 @@ impl StorageEngine for SqliteStorageEngine {
         // Update stats before returning
         self.update_stats()?;
         
-        if let Ok(stats) = self.stats.lock() {
-            Ok(stats.clone())
-        } else {
-            Err(StorageError::Other("Failed to get storage stats".to_string()))
+        match self.stats.lock() {
+            Ok(stats) => Ok(stats.clone()),
+            Err(_) => Err(StorageError::Other("Failed to get storage stats".to_string())),
         }
     }
     
@@ -347,72 +375,111 @@ impl StorageEngine for SqliteStorageEngine {
     }
 }
 
+/// Operation type for SQLite transaction
+enum SqliteOperation {
+    Put { key: Vec<u8>, value: Vec<u8> },
+    Delete { key: Vec<u8> },
+}
+
 /// SQLite transaction implementation
 struct SqliteTransaction<'a> {
     tx: Option<Transaction<'a>>,
     engine: &'a SqliteStorageEngine,
+    operations: Vec<SqliteOperation>,
 }
 
 impl<'a> StorageTransaction for SqliteTransaction<'a> {
     fn get(&self, key: &[u8]) -> StorageResult<Option<Vec<u8>>> {
-        let tx = self.tx.as_ref().ok_or_else(|| {
-            StorageError::TransactionError("Transaction already committed or aborted".to_string())
-        })?;
+        // If we have a transaction, use it
+        if let Some(tx) = &self.tx {
+            let result = tx.query_row(
+                "SELECT value FROM kv_store WHERE key = ?",
+                params![key],
+                |row| row.get(0)
+            ).optional().map_err(|e| StorageError::DatabaseError(format!("Failed to get value: {}", e)))?;
+            
+            return Ok(result);
+        }
         
-        let result = tx.query_row(
-            "SELECT value FROM kv_store WHERE key = ?",
-            params![key],
-            |row| row.get(0)
-        ).optional().map_err(|e| StorageError::DatabaseError(format!("Failed to get value: {}", e)))?;
-        
-        Ok(result)
+        // Otherwise, use the engine directly
+        self.engine.get(key)
     }
     
     fn put(&self, key: &[u8], value: &[u8]) -> StorageResult<()> {
-        let tx = self.tx.as_ref().ok_or_else(|| {
-            StorageError::TransactionError("Transaction already committed or aborted".to_string())
-        })?;
+        // Store the operation for later
+        let mut operations = self.operations.clone();
+        operations.push(SqliteOperation::Put {
+            key: key.to_vec(),
+            value: value.to_vec(),
+        });
         
-        tx.execute(
-            "INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)",
-            params![key, value]
-        ).map_err(|e| StorageError::DatabaseError(format!("Failed to put value: {}", e)))?;
+        // Update the operations list
+        let this = unsafe { &mut *(self as *const _ as *mut Self) };
+        this.operations = operations;
         
         Ok(())
     }
     
     fn delete(&self, key: &[u8]) -> StorageResult<()> {
-        let tx = self.tx.as_ref().ok_or_else(|| {
-            StorageError::TransactionError("Transaction already committed or aborted".to_string())
-        })?;
+        // Store the operation for later
+        let mut operations = self.operations.clone();
+        operations.push(SqliteOperation::Delete {
+            key: key.to_vec(),
+        });
         
-        tx.execute(
-            "DELETE FROM kv_store WHERE key = ?",
-            params![key]
-        ).map_err(|e| StorageError::DatabaseError(format!("Failed to delete key: {}", e)))?;
+        // Update the operations list
+        let this = unsafe { &mut *(self as *const _ as *mut Self) };
+        this.operations = operations;
         
         Ok(())
     }
     
     fn exists(&self, key: &[u8]) -> StorageResult<bool> {
-        let tx = self.tx.as_ref().ok_or_else(|| {
-            StorageError::TransactionError("Transaction already committed or aborted".to_string())
-        })?;
+        // If we have a transaction, use it
+        if let Some(tx) = &self.tx {
+            let count: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM kv_store WHERE key = ?",
+                params![key],
+                |row| row.get(0)
+            ).map_err(|e| StorageError::DatabaseError(format!("Failed to check if key exists: {}", e)))?;
+            
+            return Ok(count > 0);
+        }
         
-        let count: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM kv_store WHERE key = ?",
-            params![key],
-            |row| row.get(0)
-        ).map_err(|e| StorageError::DatabaseError(format!("Failed to check if key exists: {}", e)))?;
-        
-        Ok(count > 0)
+        // Otherwise, use the engine directly
+        self.engine.exists(key)
     }
     
-    fn commit(mut self: Box<Self>) -> StorageResult<()> {
-        let tx = self.tx.take().ok_or_else(|| {
-            StorageError::TransactionError("Transaction already committed or aborted".to_string())
-        })?;
+    fn commit(self: Box<Self>) -> StorageResult<()> {
+        // Get a connection from the engine
+        let mut conn = match self.engine.conn.lock() {
+            Ok(conn) => conn,
+            Err(_) => return Err(StorageError::DatabaseError("Failed to lock SQLite connection".to_string())),
+        };
         
+        // Begin a transaction
+        let tx = conn.transaction()
+            .map_err(|e| StorageError::TransactionError(format!("Failed to begin transaction: {}", e)))?;
+        
+        // Execute all operations
+        for op in &self.operations {
+            match op {
+                SqliteOperation::Put { key, value } => {
+                    tx.execute(
+                        "INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)",
+                        params![key, value]
+                    ).map_err(|e| StorageError::DatabaseError(format!("Failed to put value: {}", e)))?;
+                },
+                SqliteOperation::Delete { key } => {
+                    tx.execute(
+                        "DELETE FROM kv_store WHERE key = ?",
+                        params![key]
+                    ).map_err(|e| StorageError::DatabaseError(format!("Failed to delete key: {}", e)))?;
+                },
+            }
+        }
+        
+        // Commit the transaction
         tx.commit().map_err(|e| StorageError::TransactionError(format!("Failed to commit transaction: {}", e)))?;
         
         // Update stats
@@ -423,14 +490,8 @@ impl<'a> StorageTransaction for SqliteTransaction<'a> {
         Ok(())
     }
     
-    fn abort(mut self: Box<Self>) -> StorageResult<()> {
-        let tx = self.tx.take().ok_or_else(|| {
-            StorageError::TransactionError("Transaction already committed or aborted".to_string())
-        })?;
-        
-        // SQLite automatically rolls back when the transaction is dropped
-        drop(tx);
-        
+    fn abort(self: Box<Self>) -> StorageResult<()> {
+        // Nothing to do, as we haven't executed any operations yet
         Ok(())
     }
 }

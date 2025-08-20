@@ -36,7 +36,7 @@ impl Default for StorageType {
         #[cfg(all(not(feature = "sled-storage"), not(feature = "redb-storage"), feature = "rocksdb-storage"))]
         return StorageType::RocksDB;
         
-        // SQLite is always available
+        // SQLite is always available as it's not behind a feature flag
         #[cfg(all(not(feature = "sled-storage"), not(feature = "redb-storage"), not(feature = "rocksdb-storage")))]
         return StorageType::SQLite;
         

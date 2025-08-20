@@ -43,7 +43,7 @@ default = ["sqlite-storage"]
 sled-storage = ["sled"]
 redb-storage = ["redb"]
 rocksdb-storage = ["rocksdb"]
-sqlite-storage = []
+sqlite-storage = []  # SQLite is always available as it's not behind a feature flag
 metrics-export = ["metrics-exporter-prometheus"]
 all-storage-backends = ["sled-storage", "redb-storage", "rocksdb-storage", "sqlite-storage"]
 
