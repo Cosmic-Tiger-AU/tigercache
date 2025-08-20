@@ -114,6 +114,16 @@ impl From<SearchOptions> for SearchOptionsInternal {
     }
 }
 
+impl Default for SearchOptionsInternal {
+    fn default() -> Self {
+        Self {
+            max_distance: 2,
+            score_threshold: 0.0,
+            limit: 100,
+        }
+    }
+}
+
 impl Index {
     /// Search the index for documents matching the query
     pub fn search(&self, query: &str, options: Option<SearchOptions>) -> Result<Vec<SearchResult>> {

@@ -73,7 +73,30 @@ fn estimate_results_size(results: &[SearchResult]) -> usize {
         // Size of the fields
         for (key, value) in &result.document.fields {
             size += std::mem::size_of::<String>() + key.len();
-            size += std::mem::size_of::<String>() + value.len();
+            
+            // Estimate the size of the JSON value
+            match value {
+                serde_json::Value::String(s) => {
+                    size += std::mem::size_of::<String>() + s.len();
+                },
+                serde_json::Value::Number(_) => {
+                    size += std::mem::size_of::<f64>();
+                },
+                serde_json::Value::Bool(_) => {
+                    size += std::mem::size_of::<bool>();
+                },
+                serde_json::Value::Array(arr) => {
+                    size += std::mem::size_of::<Vec<serde_json::Value>>();
+                    size += arr.len() * std::mem::size_of::<serde_json::Value>();
+                },
+                serde_json::Value::Object(obj) => {
+                    size += std::mem::size_of::<serde_json::Map<String, serde_json::Value>>();
+                    size += obj.len() * (std::mem::size_of::<String>() + std::mem::size_of::<serde_json::Value>());
+                },
+                serde_json::Value::Null => {
+                    // No additional size
+                },
+            }
         }
         
         // Size of the score
