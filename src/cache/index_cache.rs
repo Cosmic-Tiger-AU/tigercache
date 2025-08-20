@@ -20,8 +20,9 @@ impl IndexCache {
     /// Create a new index cache with the specified maximum size
     pub fn new(max_size: ByteSize) -> Self {
         // Split the cache size between token and trigram caches
-        let token_cache_size = max_size / 2;
-        let trigram_cache_size = max_size - token_cache_size;
+        let total_bytes = max_size.as_u64();
+        let token_cache_size = ByteSize(total_bytes / 2);
+        let trigram_cache_size = ByteSize(total_bytes - (total_bytes / 2));
         
         Self {
             token_to_docs: LruCache::new(token_cache_size),
@@ -59,12 +60,12 @@ impl IndexCache {
     
     /// Get the current size of the cache in bytes
     pub fn size(&self) -> ByteSize {
-        self.token_to_docs.size() + self.trigram_to_tokens.size()
+        ByteSize(self.token_to_docs.size().as_u64() + self.trigram_to_tokens.size().as_u64())
     }
     
     /// Get the maximum size of the cache in bytes
     pub fn max_size(&self) -> ByteSize {
-        self.token_to_docs.max_size() + self.trigram_to_tokens.max_size()
+        ByteSize(self.token_to_docs.max_size().as_u64() + self.trigram_to_tokens.max_size().as_u64())
     }
     
     /// Get the number of entries in the cache
