@@ -35,6 +35,16 @@ pub struct SearchOptions {
     pub limit: usize,
 }
 
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            max_distance: 2,
+            score_threshold: 0,
+            limit: 100,
+        }
+    }
+}
+
 /// Cached search engine with LRU cache
 pub struct CachedSearchEngine {
     cache: Mutex<LruCache<(String, SearchOptions), Vec<SearchResult>>>,
