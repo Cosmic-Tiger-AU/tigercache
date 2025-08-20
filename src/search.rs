@@ -98,6 +98,7 @@ impl Index {
             .collect();
         
         // Sort by score (descending)
+        #[allow(clippy::unwrap_or_default)]
         results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
         
         // Apply limit

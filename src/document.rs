@@ -33,12 +33,12 @@ impl Document {
 
     /// Get a field value as a string if it exists and is a string
     pub fn get_text_field(&self, name: &str) -> Option<String> {
-        self.fields.get(name).and_then(|value| {
+        self.fields.get(name).map(|value| {
             if let serde_json::Value::String(s) = value {
-                Some(s.clone())
+                s.clone()
             } else {
                 // Convert non-string values to string representation
-                Some(value.to_string())
+                value.to_string()
             }
         })
     }

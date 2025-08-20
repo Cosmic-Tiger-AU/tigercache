@@ -81,8 +81,7 @@ impl TigerCache {
             Ok(())
         } else {
             Err(crate::error::TigerCacheError::IoError(
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                std::io::Error::other(
                     "No file path specified. Use save_to_file instead.",
                 ),
             ))
