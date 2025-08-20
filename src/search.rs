@@ -17,6 +17,9 @@ pub struct SearchResult {
     
     /// Relevance score (higher is better)
     pub score: f64,
+    
+    /// Fields that matched the query
+    pub matched_fields: Vec<String>,
 }
 
 /// Search configuration options
@@ -188,6 +191,7 @@ impl Index {
                 self.get_document(doc_id).map(|doc| SearchResult {
                     document: doc.clone(),
                     score: *score,
+                    matched_fields: Vec::new(),
                 })
             })
             .collect();

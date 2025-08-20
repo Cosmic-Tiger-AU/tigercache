@@ -56,62 +56,36 @@ impl QueryCache {
     pub fn is_empty(&self) -> bool {
         self.cache.is_empty()
     }
-    
-    /// Get the cache hit rate (0.0 - 1.0)
-    pub fn hit_rate(&self) -> f64 {
-        self.cache.hit_rate()
-    }
 }
 
 /// Estimate the size of search results in bytes
 fn estimate_results_size(results: &[SearchResult]) -> usize {
-    // Base size for the vector
-    let mut size = std::mem::size_of::<Vec<SearchResult>>();
+    let mut size = 0;
     
-    // Add the size of each result
+    // Base size of the vector
+    size += std::mem::size_of::<Vec<SearchResult>>();
+    
+    // Size of each result
     for result in results {
-        // Add the size of the SearchResult struct
-        size += std::mem::size_of::<SearchResult>();
+        // Size of the document
+        size += std::mem::size_of::<String>() + result.document.id.len();
         
-        // Add the size of the document ID
-        size += result.document.id.len();
-        
-        // Add the size of each field in the document
+        // Size of the fields
         for (key, value) in &result.document.fields {
-            // Add the size of the key
-            size += key.len();
-            
-            // Add the size of the value
-            match value {
-                serde_json::Value::String(text) => {
-                    size += text.len();
-                }
-                serde_json::Value::Number(_) => {
-                    size += std::mem::size_of::<f64>();
-                }
-                serde_json::Value::Bool(_) => {
-                    size += std::mem::size_of::<bool>();
-                }
-                serde_json::Value::Array(arr) => {
-                    size += std::mem::size_of::<Vec<serde_json::Value>>();
-                    size += arr.len() * std::mem::size_of::<serde_json::Value>();
-                }
-                serde_json::Value::Object(obj) => {
-                    size += std::mem::size_of::<serde_json::Map<String, serde_json::Value>>();
-                    size += obj.len() * (std::mem::size_of::<String>() + std::mem::size_of::<serde_json::Value>());
-                }
-                serde_json::Value::Null => {
-                    // No additional size
-                }
-            }
+            size += std::mem::size_of::<String>() + key.len();
+            size += std::mem::size_of::<String>() + value.len();
         }
         
-        // Add the size of the matched fields
-        size += result.matched_fields.len() * std::mem::size_of::<String>();
+        // Size of the score
+        size += std::mem::size_of::<f64>();
+        
+        // Size of the matched fields
+        size += std::mem::size_of::<Vec<String>>();
         for field in &result.matched_fields {
-            size += field.len();
+            size += std::mem::size_of::<String>() + field.len();
         }
     }
     
     size
 }
+
