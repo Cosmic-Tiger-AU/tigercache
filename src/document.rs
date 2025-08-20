@@ -61,3 +61,135 @@ impl Document {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_document_creation() {
+        let doc = Document::new("test_id");
+        assert_eq!(doc.id, "test_id");
+        assert!(doc.fields.is_empty());
+    }
+
+    #[test]
+    fn test_add_field_string() {
+        let mut doc = Document::new("test_id");
+        doc.add_field("title", "Test Title");
+        
+        assert_eq!(doc.fields.len(), 1);
+        assert!(doc.fields.contains_key("title"));
+        
+        if let serde_json::Value::String(value) = &doc.fields["title"] {
+            assert_eq!(value, "Test Title");
+        } else {
+            panic!("Field value is not a string");
+        }
+    }
+
+    #[test]
+    fn test_add_field_number() {
+        let mut doc = Document::new("test_id");
+        doc.add_field("count", 42);
+        
+        assert_eq!(doc.fields.len(), 1);
+        assert!(doc.fields.contains_key("count"));
+        
+        if let serde_json::Value::Number(value) = &doc.fields["count"] {
+            assert_eq!(value.as_i64().unwrap(), 42);
+        } else {
+            panic!("Field value is not a number");
+        }
+    }
+
+    #[test]
+    fn test_add_field_boolean() {
+        let mut doc = Document::new("test_id");
+        doc.add_field("active", true);
+        
+        assert_eq!(doc.fields.len(), 1);
+        assert!(doc.fields.contains_key("active"));
+        
+        if let serde_json::Value::Bool(value) = &doc.fields["active"] {
+            assert_eq!(*value, true);
+        } else {
+            panic!("Field value is not a boolean");
+        }
+    }
+
+    #[test]
+    fn test_add_multiple_fields() {
+        let mut doc = Document::new("test_id");
+        doc.add_field("title", "Test Title")
+           .add_field("count", 42)
+           .add_field("active", true);
+        
+        assert_eq!(doc.fields.len(), 3);
+        assert!(doc.fields.contains_key("title"));
+        assert!(doc.fields.contains_key("count"));
+        assert!(doc.fields.contains_key("active"));
+    }
+
+    #[test]
+    fn test_get_text_field_string() {
+        let mut doc = Document::new("test_id");
+        doc.add_field("title", "Test Title");
+        
+        let value = doc.get_text_field("title");
+        assert_eq!(value, Some("Test Title".to_string()));
+    }
+
+    #[test]
+    fn test_get_text_field_number() {
+        let mut doc = Document::new("test_id");
+        doc.add_field("count", 42);
+        
+        let value = doc.get_text_field("count");
+        assert_eq!(value, Some("42".to_string()));
+    }
+
+    #[test]
+    fn test_get_text_field_boolean() {
+        let mut doc = Document::new("test_id");
+        doc.add_field("active", true);
+        
+        let value = doc.get_text_field("active");
+        assert_eq!(value, Some("true".to_string()));
+    }
+
+    #[test]
+    fn test_get_text_field_nonexistent() {
+        let doc = Document::new("test_id");
+        let value = doc.get_text_field("nonexistent");
+        assert_eq!(value, None);
+    }
+
+    #[test]
+    fn test_get_all_text_fields() {
+        let mut doc = Document::new("test_id");
+        doc.add_field("title", "Test Title")
+           .add_field("description", "Test Description")
+           .add_field("count", 42)
+           .add_field("active", true);
+        
+        let fields = doc.get_all_text_fields();
+        assert_eq!(fields.len(), 4);
+        assert!(fields.contains(&"Test Title".to_string()));
+        assert!(fields.contains(&"Test Description".to_string()));
+        assert!(fields.contains(&"42".to_string()));
+        assert!(fields.contains(&"true".to_string()));
+    }
+
+    #[test]
+    fn test_get_all_text_fields_with_complex_types() {
+        let mut doc = Document::new("test_id");
+        doc.add_field("title", "Test Title")
+           .add_field("tags", vec!["tag1", "tag2"])
+           .add_field("metadata", serde_json::json!({"key": "value"}));
+        
+        let fields = doc.get_all_text_fields();
+        assert_eq!(fields.len(), 1);
+        assert!(fields.contains(&"Test Title".to_string()));
+        // Complex types (arrays and objects) should be filtered out
+    }
+}
