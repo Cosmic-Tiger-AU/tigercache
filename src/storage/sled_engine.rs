@@ -166,7 +166,7 @@ impl StorageEngine for SledStorageEngine {
         Ok(result)
     }
     
-    fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
+    fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction + '_>> {
         Ok(Box::new(SledTransaction {
             main_tree: self.main_tree.clone(),
             changes: HashMap::new(),
@@ -319,12 +319,14 @@ impl StorageTransaction for SledTransaction {
     fn put(&self, key: &[u8], value: &[u8]) -> StorageResult<()> {
         let mut changes = self.changes.clone();
         changes.insert(key.to_vec(), Some(IVec::from(value)));
+        self.changes = changes;
         Ok(())
     }
     
     fn delete(&self, key: &[u8]) -> StorageResult<()> {
         let mut changes = self.changes.clone();
         changes.insert(key.to_vec(), None);
+        self.changes = changes;
         Ok(())
     }
     
@@ -362,4 +364,3 @@ impl StorageTransaction for SledTransaction {
         Ok(())
     }
 }
-

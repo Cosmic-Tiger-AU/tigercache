@@ -85,18 +85,28 @@ fn estimate_document_size(document: &Document) -> usize {
         
         // Add the size of the value
         match value {
-            crate::document::FieldValue::Text(text) => {
+            serde_json::Value::String(text) => {
                 size += text.len();
             }
-            crate::document::FieldValue::Number(_) => {
+            serde_json::Value::Number(_) => {
                 size += std::mem::size_of::<f64>();
             }
-            crate::document::FieldValue::Boolean(_) => {
+            serde_json::Value::Bool(_) => {
                 size += std::mem::size_of::<bool>();
+            }
+            serde_json::Value::Array(arr) => {
+                size += std::mem::size_of::<Vec<serde_json::Value>>();
+                size += arr.len() * std::mem::size_of::<serde_json::Value>();
+            }
+            serde_json::Value::Object(obj) => {
+                size += std::mem::size_of::<serde_json::Map<String, serde_json::Value>>();
+                size += obj.len() * (std::mem::size_of::<String>() + std::mem::size_of::<serde_json::Value>());
+            }
+            serde_json::Value::Null => {
+                // No additional size
             }
         }
     }
     
     size
 }
-

@@ -19,6 +19,9 @@ pub enum StorageType {
     /// RocksDB embedded database
     #[cfg(feature = "rocksdb-storage")]
     RocksDB,
+    
+    /// SQLite embedded database
+    SQLite,
 }
 
 impl Default for StorageType {
@@ -33,7 +36,12 @@ impl Default for StorageType {
         #[cfg(all(not(feature = "sled-storage"), not(feature = "redb-storage"), feature = "rocksdb-storage"))]
         return StorageType::RocksDB;
         
+        // SQLite is always available
         #[cfg(all(not(feature = "sled-storage"), not(feature = "redb-storage"), not(feature = "rocksdb-storage")))]
+        return StorageType::SQLite;
+        
+        // Memory is the last resort
+        #[cfg(all(not(feature = "sled-storage"), not(feature = "redb-storage"), not(feature = "rocksdb-storage"), not(feature = "sqlite-storage")))]
         return StorageType::Memory;
     }
 }
@@ -186,4 +194,3 @@ impl StorageConfig {
         }
     }
 }
-

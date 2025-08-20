@@ -1,25 +1,15 @@
 use std::sync::Arc;
 use bytesize::ByteSize;
 
-use crate::search::{SearchOptions, SearchResult};
 use crate::cache::lru_cache::LruCache;
-
-/// Query key for cache lookups
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct QueryKey {
-    /// Query string
-    query: String,
-    
-    /// Search options
-    options: Option<SearchOptions>,
-}
+use crate::search::SearchResult;
 
 /// Query cache for TigerCache
 ///
-/// Caches search results to avoid repeated computation.
+/// Caches search results to avoid repeated searches.
 pub struct QueryCache {
-    /// LRU cache for query results
-    cache: LruCache<QueryKey, Arc<Vec<SearchResult>>>,
+    /// LRU cache for search results
+    cache: LruCache<String, Vec<SearchResult>>,
 }
 
 impl QueryCache {
@@ -31,26 +21,15 @@ impl QueryCache {
     }
     
     /// Get search results from the cache
-    pub fn get(&self, query: &str, options: Option<&SearchOptions>) -> Option<Arc<Vec<SearchResult>>> {
-        let key = QueryKey {
-            query: query.to_string(),
-            options: options.cloned(),
-        };
-        
-        self.cache.get(&key)
+    pub fn get(&self, query: &str) -> Option<Vec<SearchResult>> {
+        self.cache.get(query)
     }
     
     /// Put search results in the cache
-    pub fn put(&self, query: &str, options: Option<&SearchOptions>, results: Vec<SearchResult>) -> Option<Arc<Vec<SearchResult>>> {
-        let key = QueryKey {
-            query: query.to_string(),
-            options: options.cloned(),
-        };
-        
+    pub fn put(&self, query: String, results: Vec<SearchResult>) -> Option<Vec<SearchResult>> {
+        // Estimate the size of the results
         let size = estimate_results_size(&results);
-        let results_arc = Arc::new(results);
-        
-        self.cache.put(key, results_arc.clone(), size)
+        self.cache.put(query, results, size)
     }
     
     /// Clear the cache
@@ -68,7 +47,7 @@ impl QueryCache {
         self.cache.max_size()
     }
     
-    /// Get the number of queries in the cache
+    /// Get the number of entries in the cache
     pub fn len(&self) -> usize {
         self.cache.len()
     }
@@ -86,7 +65,7 @@ impl QueryCache {
 
 /// Estimate the size of search results in bytes
 fn estimate_results_size(results: &[SearchResult]) -> usize {
-    // Base size for the Vec struct
+    // Base size for the vector
     let mut size = std::mem::size_of::<Vec<SearchResult>>();
     
     // Add the size of each result
@@ -94,40 +73,45 @@ fn estimate_results_size(results: &[SearchResult]) -> usize {
         // Add the size of the SearchResult struct
         size += std::mem::size_of::<SearchResult>();
         
-        // Add the size of the document
-        size += estimate_document_size(&result.document);
-    }
-    
-    size
-}
-
-/// Estimate the size of a document in bytes
-fn estimate_document_size(document: &crate::document::Document) -> usize {
-    // Base size for the document struct
-    let mut size = std::mem::size_of::<crate::document::Document>();
-    
-    // Add the size of the document ID
-    size += document.id.len();
-    
-    // Add the size of each field
-    for (key, value) in &document.fields {
-        // Add the size of the key
-        size += key.len();
+        // Add the size of the document ID
+        size += result.document.id.len();
         
-        // Add the size of the value
-        match value {
-            crate::document::FieldValue::Text(text) => {
-                size += text.len();
+        // Add the size of each field in the document
+        for (key, value) in &result.document.fields {
+            // Add the size of the key
+            size += key.len();
+            
+            // Add the size of the value
+            match value {
+                serde_json::Value::String(text) => {
+                    size += text.len();
+                }
+                serde_json::Value::Number(_) => {
+                    size += std::mem::size_of::<f64>();
+                }
+                serde_json::Value::Bool(_) => {
+                    size += std::mem::size_of::<bool>();
+                }
+                serde_json::Value::Array(arr) => {
+                    size += std::mem::size_of::<Vec<serde_json::Value>>();
+                    size += arr.len() * std::mem::size_of::<serde_json::Value>();
+                }
+                serde_json::Value::Object(obj) => {
+                    size += std::mem::size_of::<serde_json::Map<String, serde_json::Value>>();
+                    size += obj.len() * (std::mem::size_of::<String>() + std::mem::size_of::<serde_json::Value>());
+                }
+                serde_json::Value::Null => {
+                    // No additional size
+                }
             }
-            crate::document::FieldValue::Number(_) => {
-                size += std::mem::size_of::<f64>();
-            }
-            crate::document::FieldValue::Boolean(_) => {
-                size += std::mem::size_of::<bool>();
-            }
+        }
+        
+        // Add the size of the matched fields
+        size += result.matched_fields.len() * std::mem::size_of::<String>();
+        for field in &result.matched_fields {
+            size += field.len();
         }
     }
     
     size
 }
-

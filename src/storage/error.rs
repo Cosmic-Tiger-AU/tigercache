@@ -108,6 +108,18 @@ impl From<bincode::error::DecodeError> for StorageError {
     }
 }
 
+impl From<rusqlite::Error> for StorageError {
+    fn from(err: rusqlite::Error) -> Self {
+        match err {
+            rusqlite::Error::SqliteFailure(_, Some(msg)) => StorageError::DatabaseError(msg),
+            rusqlite::Error::SqliteFailure(code, None) => StorageError::DatabaseError(format!("SQLite error code: {:?}", code)),
+            rusqlite::Error::QueryReturnedNoRows => StorageError::KeyNotFound("Query returned no rows".to_string()),
+            rusqlite::Error::InvalidPath(_) => StorageError::StoragePathNotFound(PathBuf::new()),
+            rusqlite::Error::IoError(io_err) => StorageError::IoError(io_err),
+            _ => StorageError::Other(err.to_string()),
+        }
+    }
+}
+
 /// Result type for storage operations
 pub type StorageResult<T> = Result<T, StorageError>;
-

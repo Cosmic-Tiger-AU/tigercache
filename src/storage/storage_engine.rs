@@ -46,7 +46,7 @@ pub trait StorageEngine: Send + Sync {
     fn exists(&self, key: &[u8]) -> StorageResult<bool>;
     
     /// Begin a transaction
-    fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>>;
+    fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction + '_>>;
     
     /// Get a page by ID
     fn get_page(&self, page_id: PageId) -> StorageResult<Option<PageRef>>;
@@ -199,7 +199,7 @@ impl StorageEngine for MemoryStorageEngine {
         Ok(result)
     }
     
-    fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
+    fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction + '_>> {
         // For in-memory, we'll use a simple transaction that just clones the data
         Ok(Box::new(MemoryTransaction {
             engine: self,
@@ -332,4 +332,3 @@ impl<'a> StorageTransaction for MemoryTransaction<'a> {
         Ok(())
     }
 }
-

@@ -12,6 +12,7 @@ use crate::storage::{
     StorageConfig,
     StorageType,
     StorageEngine,
+    StorageStats,
     create_storage_engine,
 };
 use crate::cache::{
@@ -387,7 +388,7 @@ impl TigerCache {
     }
     
     /// Get storage statistics
-    pub fn storage_stats(&self) -> Result<Option<crate::storage::StorageStats>> {
+    pub fn storage_stats(&self) -> Result<Option<StorageStats>> {
         if let Some(storage) = &self.storage {
             Ok(Some(storage.stats()?))
         } else {
