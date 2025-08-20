@@ -239,7 +239,7 @@ impl MemoryManager {
     
     /// Update memory statistics
     pub fn update_stats(&self, stats: MemoryStats) {
-        *self.stats.write() = stats;
+        *self.stats.write() = stats.clone();
         let _ = self.event_sender.send(MemoryEvent::StatsUpdated(stats));
     }
     
@@ -248,4 +248,3 @@ impl MemoryManager {
         self.event_receiver.clone()
     }
 }
-

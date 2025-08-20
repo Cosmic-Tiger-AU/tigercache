@@ -15,12 +15,13 @@ mod sled_engine;
 mod redb_engine;
 #[cfg(feature = "rocksdb-storage")]
 mod rocksdb_engine;
+mod sqlite_engine;
 
 // Re-exports
 pub use error::{StorageError, StorageResult};
 pub use config::{StorageConfig, StorageType};
 pub use page::{Page, PageId};
-pub use storage_engine::{StorageEngine, StorageTransaction};
+pub use storage_engine::{StorageEngine, StorageTransaction, StorageStats};
 
 // Factory function to create a storage engine based on configuration
 pub fn create_storage_engine(config: StorageConfig) -> StorageResult<Box<dyn StorageEngine>> {
@@ -40,12 +41,16 @@ pub fn create_storage_engine(config: StorageConfig) -> StorageResult<Box<dyn Sto
             let engine = rocksdb_engine::RocksDBStorageEngine::new(config)?;
             Ok(Box::new(engine))
         },
+        StorageType::SQLite => {
+            let engine = sqlite_engine::SqliteStorageEngine::new(config)?;
+            Ok(Box::new(engine))
+        },
         StorageType::Memory => {
             // For testing or small datasets, we can use an in-memory storage engine
             let engine = storage_engine::MemoryStorageEngine::new(config)?;
             Ok(Box::new(engine))
         },
+        #[allow(unreachable_patterns)]
         _ => Err(StorageError::UnsupportedStorageType(format!("{:?}", config.storage_type))),
     }
 }
-

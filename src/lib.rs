@@ -44,6 +44,7 @@ mod search;
 mod trigram;
 mod storage;
 mod config;
+mod cache;
 
 // Re-export public API
 pub use document::Document;
@@ -59,6 +60,14 @@ pub use storage::{
     StorageEngine,
     StorageTransaction,
     create_storage_engine,
+    StorageError,
+    StorageResult,
+};
+
+// Re-export cache API
+pub use cache::{
+    MemoryManager,
+    MemoryStats,
 };
 
 // Version information

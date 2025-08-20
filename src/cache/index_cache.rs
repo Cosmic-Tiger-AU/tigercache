@@ -7,87 +7,81 @@ use crate::intern::StringId;
 
 /// Index cache for TigerCache
 ///
-/// Caches index segments to avoid repeated disk access.
+/// Caches index data to avoid repeated lookups.
 pub struct IndexCache {
-    /// LRU cache for trigram index entries
-    trigram_cache: LruCache<StringId, SmallVec<[StringId; 4]>>,
+    /// LRU cache for token to document ID mappings
+    token_to_docs: LruCache<StringId, Vec<StringId>>,
     
-    /// LRU cache for inverted index entries
-    inverted_cache: LruCache<StringId, SmallVec<[StringId; 8]>>,
+    /// LRU cache for trigram to token ID mappings
+    trigram_to_tokens: LruCache<StringId, Vec<StringId>>,
 }
 
 impl IndexCache {
-    /// Create a new index cache with the specified maximum sizes
-    pub fn new(trigram_cache_size: ByteSize, inverted_cache_size: ByteSize) -> Self {
+    /// Create a new index cache with the specified maximum size
+    pub fn new(max_size: ByteSize) -> Self {
+        // Split the cache size between token and trigram caches
+        let total_bytes = max_size.as_u64();
+        let token_cache_size = ByteSize(total_bytes / 2);
+        let trigram_cache_size = ByteSize(total_bytes - (total_bytes / 2));
+        
         Self {
-            trigram_cache: LruCache::new(trigram_cache_size),
-            inverted_cache: LruCache::new(inverted_cache_size),
+            token_to_docs: LruCache::new(token_cache_size),
+            trigram_to_tokens: LruCache::new(trigram_cache_size),
         }
     }
     
-    /// Get a trigram index entry from the cache
-    pub fn get_trigram(&self, trigram_id: StringId) -> Option<SmallVec<[StringId; 4]>> {
-        self.trigram_cache.get(&trigram_id)
+    /// Get document IDs for a token
+    pub fn get_docs_for_token(&self, token_id: StringId) -> Option<Vec<StringId>> {
+        self.token_to_docs.get(&token_id)
     }
     
-    /// Put a trigram index entry in the cache
-    pub fn put_trigram(&self, trigram_id: StringId, tokens: SmallVec<[StringId; 4]>) -> Option<SmallVec<[StringId; 4]>> {
-        let size = estimate_smallvec_size(&tokens);
-        self.trigram_cache.put(trigram_id, tokens, size)
+    /// Put document IDs for a token in the cache
+    pub fn put_docs_for_token(&self, token_id: StringId, doc_ids: Vec<StringId>) -> Option<Vec<StringId>> {
+        let size = estimate_vec_size(&doc_ids);
+        self.token_to_docs.put(token_id, doc_ids, size)
     }
     
-    /// Get an inverted index entry from the cache
-    pub fn get_inverted(&self, token_id: StringId) -> Option<SmallVec<[StringId; 8]>> {
-        self.inverted_cache.get(&token_id)
+    /// Get token IDs for a trigram
+    pub fn get_tokens_for_trigram(&self, trigram_id: StringId) -> Option<Vec<StringId>> {
+        self.trigram_to_tokens.get(&trigram_id)
     }
     
-    /// Put an inverted index entry in the cache
-    pub fn put_inverted(&self, token_id: StringId, doc_ids: SmallVec<[StringId; 8]>) -> Option<SmallVec<[StringId; 8]>> {
-        let size = estimate_smallvec_size(&doc_ids);
-        self.inverted_cache.put(token_id, doc_ids, size)
+    /// Put token IDs for a trigram in the cache
+    pub fn put_tokens_for_trigram(&self, trigram_id: StringId, token_ids: Vec<StringId>) -> Option<Vec<StringId>> {
+        let size = estimate_vec_size(&token_ids);
+        self.trigram_to_tokens.put(trigram_id, token_ids, size)
     }
     
     /// Clear the cache
     pub fn clear(&self) {
-        self.trigram_cache.clear();
-        self.inverted_cache.clear();
+        self.token_to_docs.clear();
+        self.trigram_to_tokens.clear();
     }
     
-    /// Get the current size of the trigram cache in bytes
-    pub fn trigram_size(&self) -> ByteSize {
-        self.trigram_cache.size()
+    /// Get the current size of the cache in bytes
+    pub fn size(&self) -> ByteSize {
+        ByteSize(self.token_to_docs.size().as_u64() + self.trigram_to_tokens.size().as_u64())
     }
     
-    /// Get the current size of the inverted cache in bytes
-    pub fn inverted_size(&self) -> ByteSize {
-        self.inverted_cache.size()
+    /// Get the maximum size of the cache in bytes
+    pub fn max_size(&self) -> ByteSize {
+        ByteSize(self.token_to_docs.max_size().as_u64() + self.trigram_to_tokens.max_size().as_u64())
     }
     
-    /// Get the total size of the cache in bytes
-    pub fn total_size(&self) -> ByteSize {
-        ByteSize::b(self.trigram_cache.size().as_u64() + self.inverted_cache.size().as_u64())
+    /// Get the number of entries in the cache
+    pub fn len(&self) -> usize {
+        self.token_to_docs.len() + self.trigram_to_tokens.len()
     }
     
-    /// Get the trigram cache hit rate (0.0 - 1.0)
-    pub fn trigram_hit_rate(&self) -> f64 {
-        self.trigram_cache.hit_rate()
-    }
-    
-    /// Get the inverted cache hit rate (0.0 - 1.0)
-    pub fn inverted_hit_rate(&self) -> f64 {
-        self.inverted_cache.hit_rate()
-    }
-    
-    /// Get the average cache hit rate (0.0 - 1.0)
-    pub fn average_hit_rate(&self) -> f64 {
-        (self.trigram_cache.hit_rate() + self.inverted_cache.hit_rate()) / 2.0
+    /// Check if the cache is empty
+    pub fn is_empty(&self) -> bool {
+        self.token_to_docs.is_empty() && self.trigram_to_tokens.is_empty()
     }
 }
 
-/// Estimate the size of a SmallVec in bytes
-fn estimate_smallvec_size<T, const N: usize>(vec: &SmallVec<[T; N]>) -> usize {
-    // Base size for the SmallVec struct
-    let mut size = std::mem::size_of::<SmallVec<[T; N]>>();
+/// Estimate the size of a vector in bytes
+fn estimate_vec_size<T>(vec: &[T]) -> usize {
+    let mut size = std::mem::size_of::<Vec<T>>();
     
     // Add the size of the elements
     size += vec.len() * std::mem::size_of::<T>();

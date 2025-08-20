@@ -5,7 +5,7 @@ use crate::trigram::extract_tokens;
 use levenshtein::levenshtein;
 use lru::LruCache;
 use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
 
@@ -17,6 +17,9 @@ pub struct SearchResult {
     
     /// Relevance score (higher is better)
     pub score: f64,
+    
+    /// Fields that matched the query
+    pub matched_fields: Vec<String>,
 }
 
 /// Search configuration options
@@ -30,6 +33,16 @@ pub struct SearchOptions {
     
     /// Maximum number of results to return (default: 100)
     pub limit: usize,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            max_distance: 2,
+            score_threshold: 0,
+            limit: 100,
+        }
+    }
 }
 
 /// Cached search engine with LRU cache
@@ -97,6 +110,16 @@ impl From<SearchOptions> for SearchOptionsInternal {
             max_distance: opts.max_distance,
             score_threshold: opts.score_threshold as f64 / 1000.0,
             limit: opts.limit,
+        }
+    }
+}
+
+impl Default for SearchOptionsInternal {
+    fn default() -> Self {
+        Self {
+            max_distance: 2,
+            score_threshold: 0.0,
+            limit: 100,
         }
     }
 }
@@ -185,10 +208,15 @@ impl Index {
                     return None;
                 }
                 
-                self.get_document(doc_id).map(|doc| SearchResult {
-                    document: doc.clone(),
-                    score: *score,
-                })
+                if let Some(doc) = self.get_document(doc_id) {
+                    Some(SearchResult {
+                        document: doc.clone(),
+                        score: *score,
+                        matched_fields: Vec::new(),
+                    })
+                } else {
+                    None
+                }
             })
             .collect();
         

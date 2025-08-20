@@ -60,32 +60,28 @@ where
     where
         K: std::borrow::Borrow<Q>,
         Q: Hash + Eq + ?Sized,
+        V: Clone,
     {
         let mut entries = self.entries.write();
         
-        // Find the entry
-        let entry = entries.iter_mut().find(|(k, _)| (*k).borrow() == key);
-        
-        match entry {
-            Some((_, entry)) => {
-                // Update access time
-                entry.last_access = Instant::now();
-                
-                // Increment reference count
-                entry.ref_count = entry.ref_count.saturating_add(1);
-                
-                // Increment hit count
-                *self.hits.write() += 1;
-                
-                // Clone the value
-                Some(entry.value.clone())
-            }
-            None => {
-                // Increment miss count
-                *self.misses.write() += 1;
-                
-                None
-            }
+        // Use HashMap's get method for more efficient lookup
+        if let Some(entry) = entries.get_mut(key) {
+            // Update access time
+            entry.last_access = Instant::now();
+            
+            // Increment reference count
+            entry.ref_count = entry.ref_count.saturating_add(1);
+            
+            // Increment hit count
+            *self.hits.write() += 1;
+            
+            // Clone the value
+            Some(entry.value.clone())
+        } else {
+            // Increment miss count
+            *self.misses.write() += 1;
+            
+            None
         }
     }
     
@@ -143,20 +139,12 @@ where
         let mut entries = self.entries.write();
         let mut current_size = self.current_size.write();
         
-        // Find the entry
-        if let Some(entry) = entries.iter().find(|(k, _)| (*k).borrow() == key) {
-            let key = entry.0.clone();
-            let entry = entry.1;
-            let value = entry.value.clone();
-            let size = entry.size;
-            
-            // Remove the entry
-            entries.remove(&key);
-            
+        // Use HashMap's remove method for more efficient removal
+        if let Some(entry) = entries.remove(key) {
             // Update current size
-            *current_size = current_size.saturating_sub(size);
+            *current_size = current_size.saturating_sub(entry.size);
             
-            Some(value)
+            Some(entry.value)
         } else {
             None
         }
@@ -213,7 +201,7 @@ where
     ) {
         // Calculate how much space we need to free
         let target_size = self.max_size.saturating_sub(needed_size);
-        let mut size_to_free = current_size.saturating_sub(target_size);
+        let size_to_free = current_size.saturating_sub(target_size);
         
         if size_to_free == 0 {
             return;
@@ -249,4 +237,3 @@ where
         }
     }
 }
-
