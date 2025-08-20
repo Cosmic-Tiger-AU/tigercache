@@ -238,6 +238,7 @@ impl StorageEngine for SqliteStorageEngine {
 }
 
 /// Operation type for SQLite transaction
+#[derive(Clone)]
 enum SqliteOperation {
     Put { key: Vec<u8>, value: Vec<u8> },
     Delete { key: Vec<u8> },
