@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Configure search options
         let options = SearchOptions {
             max_distance: 2,
-            score_threshold: 0.1,
+            score_threshold: 100, // 0.1 * 1000
             limit: 10,
         };
         

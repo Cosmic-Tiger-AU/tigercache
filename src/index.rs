@@ -1,20 +1,26 @@
 use crate::document::Document;
 use crate::error::{TigerCacheError, Result};
+use crate::intern::{StringId, StringInterner};
 use crate::trigram::{extract_tokens, generate_trigrams, normalize_text};
+use rayon::prelude::*;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use smallvec::SmallVec;
 
 /// The main index structure that holds documents and search indices
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Index {
     /// Map of document IDs to documents
-    documents: HashMap<String, Document>,
+    documents: FxHashMap<StringId, Document>,
     
-    /// Inverted index mapping tokens to document IDs
-    inverted_index: HashMap<String, HashSet<String>>,
+    /// Inverted index mapping token IDs to document IDs
+    inverted_index: FxHashMap<StringId, SmallVec<[StringId; 8]>>,
     
-    /// Trigram index mapping trigrams to tokens
-    trigram_index: HashMap<String, HashSet<String>>,
+    /// Trigram index mapping trigram IDs to token IDs
+    trigram_index: FxHashMap<StringId, SmallVec<[StringId; 4]>>,
+    
+    /// String interner for memory efficiency
+    interner: StringInterner,
     
     /// Fields to be indexed for search
     indexed_fields: Vec<String>,
@@ -24,9 +30,10 @@ impl Index {
     /// Create a new empty index
     pub fn new() -> Self {
         Self {
-            documents: HashMap::new(),
-            inverted_index: HashMap::new(),
-            trigram_index: HashMap::new(),
+            documents: FxHashMap::default(),
+            inverted_index: FxHashMap::default(),
+            trigram_index: FxHashMap::default(),
+            interner: StringInterner::new(),
             indexed_fields: Vec::new(),
         }
     }
@@ -39,10 +46,11 @@ impl Index {
     
     /// Add a document to the index
     pub fn add_document(&mut self, document: Document) -> Result<()> {
-        let doc_id = document.id.clone();
+        let doc_id_str = document.id.clone();
+        let doc_id = self.interner.intern(&doc_id_str);
         
         // Extract tokens from indexed fields
-        let mut all_tokens = HashSet::new();
+        let mut all_tokens = FxHashSet::default();
         
         if self.indexed_fields.is_empty() {
             // If no specific fields are set, index all text fields
@@ -64,21 +72,24 @@ impl Index {
         
         // Update inverted index and trigram index
         for token in all_tokens {
+            let token_id = self.interner.intern(&token);
+            
             // Add document ID to inverted index for this token
             self.inverted_index
-                .entry(token.clone())
-                .or_default()
-                .insert(doc_id.clone());
+                .entry(token_id)
+                .or_insert_with(SmallVec::new)
+                .push(doc_id);
             
             // Generate trigrams for the token
             let trigrams = generate_trigrams(&token);
             
             // Add token to trigram index for each trigram
             for trigram in trigrams {
+                let trigram_id = self.interner.intern(&trigram);
                 self.trigram_index
-                    .entry(trigram)
-                    .or_default()
-                    .insert(token.clone());
+                    .entry(trigram_id)
+                    .or_insert_with(SmallVec::new)
+                    .push(token_id);
             }
         }
         
@@ -88,19 +99,98 @@ impl Index {
         Ok(())
     }
     
+    /// Add multiple documents to the index efficiently
+    pub fn add_documents_batch(&mut self, documents: Vec<Document>) -> Result<()> {
+        // Pre-allocate capacity for better performance
+        let estimated_tokens = documents.len() * 10; // rough estimate
+        self.inverted_index.reserve(estimated_tokens);
+        self.trigram_index.reserve(estimated_tokens * 3);
+        self.documents.reserve(documents.len());
+        
+        // Process documents in parallel to extract tokens
+        let token_data: Vec<_> = documents
+            .par_iter()
+            .map(|document| {
+                let mut all_tokens = FxHashSet::default();
+                
+                if self.indexed_fields.is_empty() {
+                    // If no specific fields are set, index all text fields
+                    for text in document.get_all_text_fields() {
+                        for token in extract_tokens(&text) {
+                            all_tokens.insert(token);
+                        }
+                    }
+                } else {
+                    // Otherwise, only index the specified fields
+                    for field_name in &self.indexed_fields {
+                        if let Some(text) = document.get_text_field(field_name) {
+                            for token in extract_tokens(&text) {
+                                all_tokens.insert(token);
+                            }
+                        }
+                    }
+                }
+                
+                (document.id.clone(), all_tokens)
+            })
+            .collect();
+        
+        // Now sequentially update the indices to avoid conflicts
+        for (doc_id_str, all_tokens) in token_data {
+            let doc_id = self.interner.intern(&doc_id_str);
+            
+            // Update inverted index and trigram index
+            for token in all_tokens {
+                let token_id = self.interner.intern(&token);
+                
+                // Add document ID to inverted index for this token
+                self.inverted_index
+                    .entry(token_id)
+                    .or_insert_with(SmallVec::new)
+                    .push(doc_id);
+                
+                // Generate trigrams for the token
+                let trigrams = generate_trigrams(&token);
+                
+                // Add token to trigram index for each trigram
+                for trigram in trigrams {
+                    let trigram_id = self.interner.intern(&trigram);
+                    self.trigram_index
+                        .entry(trigram_id)
+                        .or_insert_with(SmallVec::new)
+                        .push(token_id);
+                }
+            }
+        }
+        
+        // Store all documents
+        for document in documents {
+            let doc_id = self.interner.intern(&document.id);
+            self.documents.insert(doc_id, document);
+        }
+        
+        Ok(())
+    }
+    
     /// Remove a document from the index
     pub fn remove_document(&mut self, doc_id: &str) -> Result<()> {
-        if !self.documents.contains_key(doc_id) {
+        let doc_id_opt = self.interner.get_id(doc_id);
+        let doc_id_interned = match doc_id_opt {
+            Some(id) => id,
+            None => return Err(TigerCacheError::DocumentNotFound(doc_id.to_string())),
+        };
+        
+        if !self.documents.contains_key(&doc_id_interned) {
             return Err(TigerCacheError::DocumentNotFound(doc_id.to_string()));
         }
         
         // Remove document ID from inverted index
         for (_, doc_ids) in self.inverted_index.iter_mut() {
-            doc_ids.remove(doc_id);
+            doc_ids.retain(|id| *id != doc_id_interned);
         }
         
         // Remove the document
-        self.documents.remove(doc_id);
+        self.documents.remove(&doc_id_interned);
         
         // Clean up empty entries in inverted index
         self.inverted_index.retain(|_, doc_ids| !doc_ids.is_empty());
@@ -113,7 +203,8 @@ impl Index {
     
     /// Get a document by ID
     pub fn get_document(&self, doc_id: &str) -> Option<&Document> {
-        self.documents.get(doc_id)
+        let doc_id_interned = self.interner.get_id(doc_id)?;
+        self.documents.get(&doc_id_interned)
     }
     
     /// Get the number of documents in the index
@@ -122,19 +213,23 @@ impl Index {
     }
     
     /// Find candidate tokens for a search query using trigram matching
-    pub fn find_candidate_tokens(&self, query: &str) -> HashSet<String> {
+    pub fn find_candidate_tokens(&self, query: &str) -> FxHashSet<String> {
         let normalized_query = normalize_text(query);
         let query_tokens = extract_tokens(&normalized_query);
-        let mut candidate_tokens = HashSet::new();
+        let mut candidate_tokens = FxHashSet::default();
         
         for query_token in query_tokens {
             let query_trigrams = generate_trigrams(&query_token);
             
             // Find tokens that share at least one trigram with the query token
             for trigram in query_trigrams {
-                if let Some(tokens) = self.trigram_index.get(&trigram) {
-                    for token in tokens {
-                        candidate_tokens.insert(token.clone());
+                if let Some(trigram_id) = self.interner.get_id(&trigram) {
+                    if let Some(token_ids) = self.trigram_index.get(&trigram_id) {
+                        for &token_id in token_ids {
+                            if let Some(token) = self.interner.get(token_id) {
+                                candidate_tokens.insert(token.to_string());
+                            }
+                        }
                     }
                 }
             }
@@ -144,11 +239,15 @@ impl Index {
     }
     
     /// Get document IDs containing a specific token
-    pub fn get_documents_for_token(&self, token: &str) -> HashSet<String> {
-        self.inverted_index
-            .get(token)
-            .cloned()
-            .unwrap_or_else(HashSet::new)
+    pub fn get_documents_for_token(&self, token: &str) -> Vec<String> {
+        if let Some(token_id) = self.interner.get_id(token) {
+            if let Some(doc_ids) = self.inverted_index.get(&token_id) {
+                return doc_ids.iter()
+                    .filter_map(|&doc_id| self.interner.get(doc_id).map(|s| s.to_string()))
+                    .collect();
+            }
+        }
+        Vec::new()
     }
     
     /// Clear the index
@@ -156,6 +255,7 @@ impl Index {
         self.documents.clear();
         self.inverted_index.clear();
         self.trigram_index.clear();
+        self.interner.clear();
     }
 }
 
@@ -185,12 +285,16 @@ mod tests {
         assert_eq!(index.document_count(), 1);
         
         // Check that tokens were indexed
-        assert!(index.inverted_index.contains_key("test"));
-        assert!(index.inverted_index.contains_key("document"));
+        let test_id = index.interner.get_id("test");
+        let document_id = index.interner.get_id("document");
+        assert!(test_id.is_some());
+        assert!(document_id.is_some());
         
         // Check that trigrams were generated
-        assert!(index.trigram_index.contains_key("tes"));
-        assert!(index.trigram_index.contains_key("est"));
+        let tes_id = index.interner.get_id("tes");
+        let est_id = index.interner.get_id("est");
+        assert!(tes_id.is_some());
+        assert!(est_id.is_some());
     }
     
     #[test]
@@ -205,8 +309,11 @@ mod tests {
         assert_eq!(index.document_count(), 0);
         
         // Check that document was removed from inverted index
+        let doc1_id = index.interner.get_id("doc1");
         for (_, doc_ids) in &index.inverted_index {
-            assert!(!doc_ids.contains("doc1"));
+            if let Some(id) = doc1_id {
+                assert!(!doc_ids.contains(&id));
+            }
         }
     }
     

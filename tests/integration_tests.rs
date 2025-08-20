@@ -33,7 +33,7 @@ fn test_full_workflow() {
     // Search with options
     let options = SearchOptions {
         max_distance: 1,
-        score_threshold: 0.0,
+        score_threshold: 0,
         limit: 10,
     };
     
@@ -157,7 +157,7 @@ fn test_search_options() {
     // Test with limit
     let options = SearchOptions {
         max_distance: 2,
-        score_threshold: 0.0,
+        score_threshold: 0,
         limit: 1,
     };
     
@@ -167,7 +167,7 @@ fn test_search_options() {
     // Test with higher score threshold
     let options = SearchOptions {
         max_distance: 2,
-        score_threshold: 0.9, // High threshold
+        score_threshold: 900, // High threshold (0.9 * 1000)
         limit: 10,
     };
     
@@ -177,7 +177,7 @@ fn test_search_options() {
     // Test with very strict distance
     let options = SearchOptions {
         max_distance: 0, // No typo tolerance
-        score_threshold: 0.0,
+        score_threshold: 0,
         limit: 10,
     };
     
@@ -206,7 +206,7 @@ fn test_large_dataset() {
     // Search with limit
     let options = SearchOptions {
         max_distance: 2,
-        score_threshold: 0.0,
+        score_threshold: 0,
         limit: 10,
     };
     

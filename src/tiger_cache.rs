@@ -54,6 +54,11 @@ impl TigerCache {
         self.index.add_document(document)
     }
     
+    /// Add multiple documents to the index efficiently
+    pub fn add_documents_batch(&mut self, documents: Vec<Document>) -> Result<()> {
+        self.index.add_documents_batch(documents)
+    }
+    
     /// Remove a document from the index
     pub fn remove_document(&mut self, doc_id: &str) -> Result<()> {
         self.index.remove_document(doc_id)
@@ -260,7 +265,7 @@ mod tests {
         // With options
         let options = SearchOptions {
             max_distance: 1,
-            score_threshold: 0.0,
+            score_threshold: 0,
             limit: 1,
         };
         

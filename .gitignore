@@ -20,3 +20,5 @@ rust-project.json
 
 # Binary files
 *.bin
+
+test_data.json

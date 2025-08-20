@@ -3,7 +3,11 @@ use crate::error::Result;
 use crate::index::Index;
 use crate::trigram::extract_tokens;
 use levenshtein::levenshtein;
-use std::collections::{HashMap, HashSet};
+use lru::LruCache;
+use rayon::prelude::*;
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::num::NonZeroUsize;
+use std::sync::Mutex;
 
 /// Search result with document and score
 #[derive(Debug, Clone)]
@@ -16,15 +20,64 @@ pub struct SearchResult {
 }
 
 /// Search configuration options
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SearchOptions {
     /// Maximum Levenshtein distance for fuzzy matching (default: 2)
     pub max_distance: usize,
     
     /// Minimum score threshold for results (default: 0.0)
-    pub score_threshold: f64,
+    pub score_threshold: u32, // Changed to u32 for hash compatibility
     
     /// Maximum number of results to return (default: 100)
+    pub limit: usize,
+}
+
+/// Cached search engine with LRU cache
+pub struct CachedSearchEngine {
+    cache: Mutex<LruCache<(String, SearchOptions), Vec<SearchResult>>>,
+}
+
+impl CachedSearchEngine {
+    pub fn new(cache_size: usize) -> Self {
+        Self {
+            cache: Mutex::new(LruCache::new(NonZeroUsize::new(cache_size).unwrap())),
+        }
+    }
+    
+    pub fn search_with_cache(&self, index: &Index, query: &str, options: SearchOptions) -> Result<Vec<SearchResult>> {
+        let cache_key = (query.to_string(), options.clone());
+        
+        // Try to get from cache first
+        if let Ok(mut cache) = self.cache.lock() {
+            if let Some(cached_results) = cache.get(&cache_key) {
+                return Ok(cached_results.clone());
+            }
+        }
+        
+        // Not in cache, perform search
+        let score_threshold = options.score_threshold as f64 / 1000.0; // Convert back to f64
+        let search_opts = SearchOptionsInternal {
+            max_distance: options.max_distance,
+            score_threshold,
+            limit: options.limit,
+        };
+        
+        let results = index.search_internal(query, search_opts)?;
+        
+        // Cache the results
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.put(cache_key, results.clone());
+        }
+        
+        Ok(results)
+    }
+}
+
+/// Internal search options with f64 support
+#[derive(Debug, Clone)]
+pub(crate) struct SearchOptionsInternal {
+    pub max_distance: usize,
+    pub score_threshold: f64,
     pub limit: usize,
 }
 
@@ -32,8 +85,18 @@ impl Default for SearchOptions {
     fn default() -> Self {
         Self {
             max_distance: 2,
-            score_threshold: 0.0,
+            score_threshold: 0, // 0.0 represented as 0
             limit: 100,
+        }
+    }
+}
+
+impl From<SearchOptions> for SearchOptionsInternal {
+    fn from(opts: SearchOptions) -> Self {
+        Self {
+            max_distance: opts.max_distance,
+            score_threshold: opts.score_threshold as f64 / 1000.0,
+            limit: opts.limit,
         }
     }
 }
@@ -42,38 +105,70 @@ impl Index {
     /// Search the index for documents matching the query
     pub fn search(&self, query: &str, options: Option<SearchOptions>) -> Result<Vec<SearchResult>> {
         let options = options.unwrap_or_default();
+        let internal_options = SearchOptionsInternal::from(options);
+        self.search_internal(query, internal_options)
+    }
+    
+    /// Internal search method with f64 options
+    pub fn search_internal(&self, query: &str, options: SearchOptionsInternal) -> Result<Vec<SearchResult>> {
         let query_tokens = extract_tokens(query);
         
         if query_tokens.is_empty() {
             return Ok(Vec::new());
         }
         
-        // Find candidate tokens using trigram matching
-        let mut all_candidate_tokens = HashSet::new();
+        // Find candidate tokens with trigram overlap scoring
+        let mut candidate_scores = FxHashMap::default();
         for query_token in &query_tokens {
+            let query_trigrams = crate::trigram::generate_trigrams(query_token);
             let candidates = self.find_candidate_tokens(query_token);
-            all_candidate_tokens.extend(candidates);
-        }
-        
-        // Filter candidates by Levenshtein distance
-        let mut filtered_tokens = HashMap::new();
-        for candidate in all_candidate_tokens {
-            for query_token in &query_tokens {
-                let distance = levenshtein(query_token, &candidate);
-                if distance <= options.max_distance {
-                    filtered_tokens.insert(candidate.clone(), distance);
-                    break;
+            
+            // Score candidates by trigram overlap
+            for candidate in candidates {
+                let candidate_trigrams = crate::trigram::generate_trigrams(&candidate);
+                let overlap = query_trigrams.intersection(&candidate_trigrams).count();
+                let total_trigrams = query_trigrams.len().max(candidate_trigrams.len());
+                
+                if total_trigrams > 0 {
+                    let trigram_score = overlap as f64 / total_trigrams as f64;
+                    // Only consider candidates with reasonable trigram overlap
+                    if trigram_score >= 0.2 {
+                        let distance = levenshtein(query_token, &candidate);
+                        if distance <= options.max_distance + 1 {
+                            candidate_scores.insert(candidate, (distance, trigram_score));
+                        }
+                    }
                 }
             }
         }
         
-        // Get document IDs for filtered tokens
-        let mut document_scores = HashMap::new();
-        for (token, distance) in filtered_tokens {
+        // Filter candidates by Levenshtein distance with parallel processing
+        let filtered_tokens: FxHashMap<String, (usize, f64)> = candidate_scores
+            .into_par_iter()
+            .filter_map(|(candidate, (distance, trigram_score))| {
+                if distance <= options.max_distance {
+                    Some((candidate, (distance, trigram_score)))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        
+        // Get document IDs for filtered tokens with improved scoring
+        let mut document_scores = FxHashMap::default();
+        for (token, (distance, trigram_score)) in filtered_tokens {
             let doc_ids = self.get_documents_for_token(&token);
             
-            // Calculate token score (inverse of distance)
-            let token_score = 1.0 / (distance as f64 + 1.0);
+            // Calculate token score combining distance and trigram overlap
+            let distance_score = 1.0 / (distance as f64 + 1.0);
+            let combined_score = distance_score * (1.0 + trigram_score);
+            
+            // Boost exact matches significantly
+            let token_score = if distance == 0 { 
+                combined_score * 5.0 
+            } else { 
+                combined_score 
+            };
             
             // Update document scores
             for doc_id in doc_ids {
@@ -82,9 +177,9 @@ impl Index {
             }
         }
         
-        // Create search results
+        // Create search results with early termination
         let mut results: Vec<SearchResult> = document_scores
-            .iter()
+            .par_iter()
             .filter_map(|(doc_id, score)| {
                 if *score < options.score_threshold {
                     return None;
@@ -97,11 +192,14 @@ impl Index {
             })
             .collect();
         
-        // Sort by score (descending)
-        #[allow(clippy::unwrap_or_default)]
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        // Sort by score (descending) with stable sort for consistent results
+        results.sort_by(|a, b| {
+            b.score.partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.document.id.cmp(&b.document.id))
+        });
         
-        // Apply limit
+        // Apply limit with early termination
         if results.len() > options.limit {
             results.truncate(options.limit);
         }
@@ -167,7 +265,7 @@ mod tests {
         
         let options = SearchOptions {
             max_distance: 1, // Stricter fuzzy matching
-            score_threshold: 0.5,
+            score_threshold: 500,
             limit: 1,
         };
         
@@ -178,7 +276,7 @@ mod tests {
         // This should not match with max_distance 1 (too many errors)
         let options_strict = SearchOptions {
             max_distance: 0, // No fuzzy matching
-            score_threshold: 0.5,
+            score_threshold: 500,
             limit: 1,
         };
         let results = index.search("Appple", Some(options_strict)).unwrap();

@@ -37,6 +37,7 @@
 mod document;
 mod error;
 mod index;
+mod intern;
 mod tiger_cache;
 mod persistence;
 mod search;
