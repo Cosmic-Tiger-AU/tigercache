@@ -242,9 +242,13 @@ impl Index {
     pub fn get_documents_for_token(&self, token: &str) -> Vec<String> {
         if let Some(token_id) = self.interner.get_id(token) {
             if let Some(doc_ids) = self.inverted_index.get(&token_id) {
-                return doc_ids.iter()
-                    .filter_map(|&doc_id| self.interner.get(doc_id).map(|s| s.to_string()))
-                    .collect();
+                let mut result = Vec::new();
+                for &doc_id in doc_ids.iter() {
+                    if let Some(s) = self.interner.get(doc_id) {
+                        result.push(s.to_string());
+                    }
+                }
+                return result;
             }
         }
         Vec::new()
